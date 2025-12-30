@@ -10,6 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import GCNConv, global_mean_pool
 from torch_geometric.data import Data, DataLoader
+import streamlit.components.v1 as components
 
 try:
     import torch
@@ -128,7 +129,6 @@ def load_historical_data(yahoo_ticker):
     scaler_target.fit(unscaled_target_data) 
 
     return raw, scaler_target
-
 
 def create_graph_data(scaled_data, window=WINDOW, feature_cols=FEATURE_COLS, target_col=TARGET_COL):
     num_features = len(feature_cols)
@@ -402,29 +402,12 @@ def cell(label, value):
         unsafe_allow_html=True
     )
 
-def table_cell(text, bold=False):
-    weight = "700" if bold else "400"
-    st.markdown(
-        f"""
-        <div style="
-            border: 1px solid #666;
-            padding: 12px 20px;
-            font-size: 18px;
-            font-weight: {weight};
-            text-align: center;
-        ">
-            {text}
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
 st.markdown("<h1 style='text-align: center;'>AUREX 📈</h1>", unsafe_allow_html=True)
 st.markdown("<p style='text-align: center; font-size: 20px; color: gray;'>Automated Foreign Exchange Forecasting</p>", unsafe_allow_html=True)
 
-tabs = st.tabs(["Data", "Prediction", "About Us"])
+tabs = st.tabs(["Forecast", "Data", "About"])
 
-with tabs[0]:
+with tabs[1]:
     st.header("📊 Data")
     default_end_date = date.today()
     default_start_date = default_end_date - timedelta(days=365)
@@ -469,8 +452,7 @@ with tabs[0]:
                 margin=dict(l=20, r=20, t=30, b=20),
                 height=600
             )
-            # fig.update_layout(height=600, template='plotly_dark')
-            # fig.update_xaxes(rangeslider_visible=True, rangebreaks=[dict(bounds=['sat','mon'])])
+
             if interval in ["1d", "1wk"]:
                 fig.update_xaxes(
                     rangeslider_visible=True,
@@ -485,21 +467,23 @@ with tabs[0]:
             data_display.set_index('Date', inplace=True)
             st.dataframe(data_display.style.format({'Open':'{:.6f}','High':'{:.6f}','Low':'{:.6f}','Close':'{:.6f}'}))
 
-with tabs[1]:
-    st.header("🔮 Prediction Results")
+with tabs[0]:
+    st.header("🔮 Forecast")
+    st.write("Select parameters to forecast ForEx rates.")
     col_1, col_2 = st.columns([1,1])
     with col_1:
-        currency_pred = st.selectbox("Currency To Predict", list(CURRENCY_YAHOO.keys()), key="pred_currency")
-        model_choice = st.selectbox("Model", ["GCN","GCN + RSA"], key="model_choice")
+        currency_pred = st.selectbox("Currency", list(CURRENCY_YAHOO.keys()), key="pred_currency")
+        model_choice = st.selectbox("Deep Learning Model", ["GCN","GCN + RSA"], key="model_choice", 
+        help="**Graph Convolutional Network** \n\n GCN is a deep learning model that can understand relationships between multiple variables. Instead of looking at data one-by-one, GCN learns how different features influence each other, which is highly effective for financial time-series data.\n\n**Graph Convolutional Network + Reptile Search Algorithm** \n\n This model combines the relational power of GCN with the Reptile Search Algorithm (RSA). RSA is an optimization algorithm that mimics the hunting behavior of crocodiles. It helps the model automatically find better parameter values. This makes the resulting predictions more accurate and stable compared to baseline models.")
         steps = st.number_input("Forecast Days", min_value=1, max_value=10, value=DEFAULT_FORECAST_STEPS)
         model_key = (currency_pred, model_choice)
         model_path_to_load = MODEL_PATHS.get(model_key)
         model_path_found = model_path_to_load is not None
 
     st.markdown("---")
-    if st.button("Run Prediction"):       
+    if st.button("Run Forecast"):       
         try:
-            with st.spinner(f"Loading data and model..."):
+            with st.spinner("Analyzing Data..."):
                 
                 # 1. Load Data and Scaler (FIX: Pass the Yahoo Ticker)
                 yahoo_ticker = CURRENCY_YAHOO[currency_pred]
@@ -516,9 +500,6 @@ with tabs[1]:
 
                 scaled_feats = df_historical.copy() 
 
-                # st.write("df_historal size = " + str(len(df_historical)))
-                # st.write("scaled_feats size = " + str(len(scaled_feats)))
-
                 # 2. Load Model
                 model = load_model(model_path_to_load)
                 if model is None:
@@ -529,39 +510,22 @@ with tabs[1]:
                 data_list, train_idx, val_idx, test_idx = create_graph_data(scaled_feats)
                 train_loader, val_loader, test_loader = get_data_loaders(data_list, train_idx, val_idx, test_idx, batch_size=32)
                 
-            with st.spinner("Generating predictions and forecast..."):
+            with st.spinner("Generating Forecast..."):
                 
                 # 4. Get Predictions and Metrics for Train/Val/Test
                 train_actuals, train_preds, train_metrics = eval_epoch_predictions(model, train_loader, scaler_target)
                 val_actuals, val_preds, val_metrics = eval_epoch_predictions(model, val_loader, scaler_target)
                 test_actuals, test_preds, test_metrics = eval_epoch_predictions(model, test_loader, scaler_target)
-                
-                # Combine metrics for display
-                # metrics_data = {
-                #     'Metric': ['RMSE', 'MAE', 'R2', 'MAPE (%)'],
-                #     'Train': [train_metrics['RMSE'], train_metrics['MAE'], train_metrics['R2'], train_metrics['MAPE']],
-                #     'Validation': [val_metrics['RMSE'], val_metrics['MAE'], val_metrics['R2'], val_metrics['MAPE']],
-                #     'Test': [test_metrics['RMSE'], test_metrics['MAE'], test_metrics['R2'], test_metrics['MAPE']]
-                # }
-
-                # metrics_data = {
-                #     'Metric': ['RMSE', 'MAE', 'MAPE (%)', 'R2'],
-                #     'Test': [test_metrics['RMSE'], test_metrics['MAE'], test_metrics['MAPE'], test_metrics['R2']]
-                # }
-                # metrics_df = pd.DataFrame(metrics_data).set_index('Metric').applymap(lambda x: f"{x:.6f}")
 
                 # 5. Generate Forecast
-                # st.write("generate forecast ")
                 last_window_loader = last_window_global_scaled(scaled_feats)
                 forecast_unscaled = forecast_steps(model, last_window_loader, int(steps), scaler_target)
 
                 # 6. Prepare Data for Plotting
-                # st.write("prepare data for plotting ")
                 historical_data_dates = df_historical['Date'].iloc[WINDOW:].reset_index(drop=True)
                 
                 # Forecast Dates (Next 'n' Business days)
                 last_date = df_historical['Date'].iloc[-1]
-                # Use 'B' for business day frequency, which is typical for currency data
                 forecast_dates = pd.date_range(start=last_date, periods=int(steps) + 1, inclusive='right', freq='B') 
                 
                 # Combine all predictions/actuals
@@ -574,10 +538,10 @@ with tabs[1]:
                 # 7. Create Interactive Plot (Plotly)
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(x=actual_data.index, y=actual_data.values, mode='lines', name='Actual Price', line=dict(color='#e5e7eb', width=1)))
-                fig.add_trace(go.Scatter(x=train_preds_series.index, y=train_preds_series.values, mode='lines', name='Predicted Train', line=dict(color='#22c55e', dash='dot')))
-                fig.add_trace(go.Scatter(x=val_preds_series.index, y=val_preds_series.values, mode='lines', name='Predicted Validation', line=dict(color='#f59e0b', dash='dot')))
-                fig.add_trace(go.Scatter(x=test_preds_series.index, y=test_preds_series.values, mode='lines', name='Predicted Test', line=dict(color='#ef4444', dash='dot')))
-                fig.add_trace(go.Scatter(x=forecast_series.index, y=forecast_series.values, mode='lines+markers', name=f'Forecast (Next {int(steps)} Days)', line=dict(color='#3b82f6', dash='dot'), marker=dict(size=5)))
+                fig.add_trace(go.Scatter(x=train_preds_series.index, y=train_preds_series.values, mode='lines', name='Forecasted Train', line=dict(color='#22c55e', dash='dot')))
+                fig.add_trace(go.Scatter(x=val_preds_series.index, y=val_preds_series.values, mode='lines', name='Forecasted Validation', line=dict(color='#f59e0b', dash='dot')))
+                fig.add_trace(go.Scatter(x=test_preds_series.index, y=test_preds_series.values, mode='lines', name='Forecasted Test', line=dict(color='#ef4444', dash='dot')))
+                fig.add_trace(go.Scatter(x=forecast_series.index, y=forecast_series.values, mode='lines+markers', name=f'Next {int(steps)} Days Forecast', line=dict(color='#3b82f6', dash='dot'), marker=dict(size=5)))
 
                 fig.update_layout(
                     plot_bgcolor='#121212',
@@ -607,11 +571,11 @@ with tabs[1]:
                 st.header(f"Results for {currency_pred} using {model_choice}")
                 
                 # Chart
-                st.subheader("Time Series Chart (Actuals, Predictions, and Forecast)")
+                st.subheader("Time Series Chart")
                 st.plotly_chart(fig, use_container_width=True)
                 
                 # Forecast Table
-                st.subheader(f"Predicted Forecast Values (Next {int(steps)} Days)")
+                st.subheader(f"Next {int(steps)} Days Forecast Price")
                 forecast_table = pd.DataFrame({
                     'Day Ahead': [f"Day {i+1}" for i in range(int(steps))],
                     'Date': forecast_dates.strftime('%Y-%m-%d'),
@@ -626,9 +590,6 @@ with tabs[1]:
                 }
                 metrics_df = pd.DataFrame(metrics_data).set_index('Metric').T.applymap(lambda x: f"{x:.6f}")
                 st.subheader("Model Performance Metrics")
-                # st.dataframe(metrics_df, use_container_width=False)
-
-                # cols = st.columns([1, 2, 0.5, 1, 2])  # widths = padding control
 
                 cols = st.columns(4)
 
@@ -641,57 +602,46 @@ with tabs[1]:
                 with cols[3]:
                     cell("R²", f"{test_metrics['R2']:.6f}")
 
-
-                # cols = st.columns(8)
-                # table_cell("MSE", bold=True)
-                # table_cell("200")
-                # table_cell("")          # padding column
-                # table_cell("RMSE", True)
-                # table_cell("300")
-                # table_cell("")
-                # table_cell("MAE", True)
-                # table_cell("150")
-
         except Exception as e:
             st.error(f"An unexpected error occurred during prediction: {e}")
 
 with tabs[2]:
-    st.header("ℹ️ About Us")
-    st.write("This application is designed to help users analyze and predict foreign exchange (forex) price movements using advanced deep learning models.")
+    st.header("ℹ️ About Aurex")
+    st.write("Aurex is designed to help traders analyze and predict foreign exchange (ForEx) price movements using advanced deep learning models.")
     st.markdown("---")
     
-    st.header("🎯 Purpose of This Application")
+    st.header("🎯 Goal")
     st.markdown("""
-    * To demonstrate how advanced deep learning models can be applied to forex forecasting.
+    * To apply advanced deep learning models to ForEx forecasting.
     * To provide transparent and understandable results.
     * To support research, learning, and decision analysis.
     """)
     st.markdown("---")
 
-    st.header("🧠 Prediction Models Used")
+    st.header("🧠 Supported Deep Learning Models")
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("1. GCN")
         st.info("**Graph Convolutional Network**")
         st.write("""
-        GCN is a machine learning model that can understand relationships between multiple variables. 
+        GCN is a deep learning model that can understand relationships between multiple variables. 
         Instead of looking at data one-by-one, GCN learns how different features influence each other, 
         which is highly effective for financial time-series data.
         """)
 
     with col2:
         st.subheader("2. GCN + RSA")
-        st.info("**Optimized Deep Learning Model**")
+        st.info("**Graph Convolutional Network + Reptile Search Algorithm**")
         st.write("""
-        This model combines the relational power of GCN with the **Reptile Search Algorithm (RSA)**.
-        * **RSA is an optimization algorithm** that mimics the hunting behavior of crocodiles.
-        * It helps the model **automatically find better parameter values**.
-        * This makes the resulting predictions more **accurate and stable** compared to baseline models.
+        This model combines the relational power of GCN with the **Reptile Search Algorithm (RSA)**. 
+        **RSA is an optimization algorithm** that mimics the hunting behavior of crocodiles.
+        It helps the model **automatically find better parameter values**.
+        This makes the resulting predictions more **accurate and stable** compared to baseline models.
         """)
     st.markdown("---")
 
     st.header("📊 Evaluation Metrics")
-    st.write("To measure how good the predictions are, this application uses several metrics that compare predicted values with actual market prices.")
+    st.write("To measure how good the predictions are, AUREX uses several metrics that compare predicted values with actual market prices.")
 
     row1_col1, row1_col2 = st.columns(2)
     row2_col1, row2_col2 = st.columns(2)
@@ -739,4 +689,3 @@ with tabs[2]:
     * Predictions should not be considered financial advice.
     * Market conditions can change suddenly and unpredictably.
     """)
-    
